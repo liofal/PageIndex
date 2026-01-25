@@ -1,0 +1,39 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/python
+{
+	"name": "Python 3",
+	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
+	"image": "mcr.microsoft.com/devcontainers/python:2-3.14-trixie",
+
+  "features": {
+    // "ghcr.io/dhoeric/features/google-cloud-cli:1": {},
+    "ghcr.io/devcontainers/features/aws-cli:1": {},
+    "ghcr.io/devcontainers-extra/features/node-asdf:0": {},
+    // "ghcr.io/skriptfabrik/devcontainer-features/gitlab-cli:1": {},
+    // "ghcr.io/devcontainers/features/go:1": {}
+  },
+  "mounts": [
+    "source=${localEnv:HOME}/.codex,target=/home/vscode/.codex,type=bind",
+    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind",
+    // "source=${localEnv:HOME}/.config/gcloud,target=/home/vscode/.config/gcloud,type=bind",
+    "source=${localEnv:HOME}/.aws,target=/home/vscode/.aws,type=bind",
+    // "source=${localEnv:HOME}/.gt,target=/home/vscode/gt,type=bind"
+  ],
+  
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "openai.chatgpt",
+        "Anthropic.claude-code",
+        "ms-toolsai.jupyter",
+        "kilocode.kilo-code",
+        "GitLab.gitlab-workflow"
+      ]
+    }
+  },
+  "containerEnv": {
+    "AWS_PROFILE": "SpeosInnovationProd",
+    "CLAUDE_CODE_USE_BEDROCK": "1",
+    "AWS_REGION": "eu-west-1"
+  }
+}
