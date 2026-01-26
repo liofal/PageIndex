@@ -5,6 +5,7 @@ import math
 import random
 import re
 from .utils import *
+from .llm import set_defaults
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -1057,6 +1058,15 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
 
 def page_index_main(doc, opt=None):
     logger = JsonLogger(doc)
+    if opt is None:
+        opt = ConfigLoader().load()
+    set_defaults(
+        provider=getattr(opt, "provider", None),
+        aws_region=getattr(opt, "aws_region", None),
+        aws_profile=getattr(opt, "aws_profile", None),
+        bedrock_inference_profile_arn=getattr(opt, "bedrock_inference_profile_arn", None),
+        bedrock_max_tokens=getattr(opt, "bedrock_max_tokens", None),
+    )
     
     is_valid_pdf = (
         (isinstance(doc, str) and os.path.isfile(doc) and doc.lower().endswith(".pdf")) or 

@@ -3,6 +3,8 @@ import os
 import json
 from pageindex import *
 from pageindex.page_index_md import md_to_tree
+from pageindex.utils import ConfigLoader
+from pageindex.llm import set_defaults
 
 if __name__ == "__main__":
     # Set up argument parser
@@ -11,6 +13,13 @@ if __name__ == "__main__":
     parser.add_argument('--md_path', type=str, help='Path to the Markdown file')
 
     parser.add_argument('--model', type=str, default='gpt-4o-2024-11-20', help='Model to use')
+    parser.add_argument('--provider', type=str, default=None, help='LLM provider (openai or bedrock)')
+    parser.add_argument('--aws-region', type=str, default=None, help='AWS region for Bedrock (default: eu-west-1)')
+    parser.add_argument('--aws-profile', type=str, default=None, help='AWS profile for Bedrock (optional)')
+    parser.add_argument('--bedrock-inference-profile-arn', type=str, default=None,
+                      help='Bedrock inference profile ARN (optional)')
+    parser.add_argument('--bedrock-max-tokens', type=int, default=None,
+                      help='Max output tokens for Bedrock models (optional)')
 
     parser.add_argument('--toc-check-pages', type=int, default=20, 
                       help='Number of pages to check for table of contents (PDF only)')
@@ -52,15 +61,30 @@ if __name__ == "__main__":
             
         # Process PDF file
         # Configure options
-        opt = config(
-            model=args.model,
-            toc_check_page_num=args.toc_check_pages,
-            max_page_num_each_node=args.max_pages_per_node,
-            max_token_num_each_node=args.max_tokens_per_node,
-            if_add_node_id=args.if_add_node_id,
-            if_add_node_summary=args.if_add_node_summary,
-            if_add_doc_description=args.if_add_doc_description,
-            if_add_node_text=args.if_add_node_text
+        config_loader = ConfigLoader()
+        user_opt = {
+            'model': args.model,
+            'provider': args.provider,
+            'aws_region': args.aws_region,
+            'aws_profile': args.aws_profile,
+            'bedrock_inference_profile_arn': args.bedrock_inference_profile_arn,
+            'bedrock_max_tokens': args.bedrock_max_tokens,
+            'toc_check_page_num': args.toc_check_pages,
+            'max_page_num_each_node': args.max_pages_per_node,
+            'max_token_num_each_node': args.max_tokens_per_node,
+            'if_add_node_id': args.if_add_node_id,
+            'if_add_node_summary': args.if_add_node_summary,
+            'if_add_doc_description': args.if_add_doc_description,
+            'if_add_node_text': args.if_add_node_text,
+        }
+        user_opt = {k: v for k, v in user_opt.items() if v is not None}
+        opt = config_loader.load(user_opt)
+        set_defaults(
+            provider=opt.provider,
+            aws_region=opt.aws_region,
+            aws_profile=opt.aws_profile,
+            bedrock_inference_profile_arn=opt.bedrock_inference_profile_arn,
+            bedrock_max_tokens=opt.bedrock_max_tokens,
         )
 
         # Process the PDF
@@ -92,20 +116,32 @@ if __name__ == "__main__":
         import asyncio
         
         # Use ConfigLoader to get consistent defaults (matching PDF behavior)
-        from pageindex.utils import ConfigLoader
         config_loader = ConfigLoader()
         
         # Create options dict with user args
         user_opt = {
             'model': args.model,
+            'provider': args.provider,
+            'aws_region': args.aws_region,
+            'aws_profile': args.aws_profile,
+            'bedrock_inference_profile_arn': args.bedrock_inference_profile_arn,
+            'bedrock_max_tokens': args.bedrock_max_tokens,
             'if_add_node_summary': args.if_add_node_summary,
             'if_add_doc_description': args.if_add_doc_description,
             'if_add_node_text': args.if_add_node_text,
             'if_add_node_id': args.if_add_node_id
         }
+        user_opt = {k: v for k, v in user_opt.items() if v is not None}
         
         # Load config with defaults from config.yaml
         opt = config_loader.load(user_opt)
+        set_defaults(
+            provider=opt.provider,
+            aws_region=opt.aws_region,
+            aws_profile=opt.aws_profile,
+            bedrock_inference_profile_arn=opt.bedrock_inference_profile_arn,
+            bedrock_max_tokens=opt.bedrock_max_tokens,
+        )
         
         toc_with_page_number = asyncio.run(md_to_tree(
             md_path=args.md_path,

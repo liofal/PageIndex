@@ -172,8 +172,15 @@ You can customize the processing with additional optional arguments:
 --if-add-node-id        Add node ID (yes/no, default: yes)
 --if-add-node-summary   Add node summary (yes/no, default: yes)
 --if-add-doc-description Add doc description (yes/no, default: yes)
+--provider              LLM provider: openai or bedrock (default: openai)
+--aws-region            AWS region for Bedrock (default: eu-west-1)
+--aws-profile           AWS profile for Bedrock (optional, supports SSO)
+--bedrock-inference-profile-arn Bedrock inference profile ARN (optional)
+--bedrock-max-tokens    Max output tokens for Bedrock models (optional)
 ```
 </details>
+
+> Note: Claude 4.5 models on Bedrock require an inference profile ARN.
 
 <details>
 <summary><strong>Markdown support</strong></summary>

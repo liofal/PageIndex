@@ -1,4 +1,9 @@
 model: "gpt-4o-2024-11-20"
+provider: "openai"
+aws_region: "eu-west-1"
+aws_profile: ""
+bedrock_inference_profile_arn: ""
+bedrock_max_tokens: 2048
 toc_check_page_num: 20
 max_page_num_each_node: 10
 max_token_num_each_node: 20000

@@ -11,13 +11,36 @@ import subprocess
 import tempfile
 from pathlib import Path
 from dotenv import load_dotenv
-import openai
 import pymupdf
+from pageindex.llm import chat
 
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv("CHATGPT_API_KEY")
-client = openai.OpenAI(api_key=OPENAI_API_KEY)
+DEFAULT_BEDROCK_REGION = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "eu-west-1"
+
+BEDROCK_MODELS = [
+    {
+        "label": "Claude Opus 4.5 (Bedrock, EU profile)",
+        "model_id": "anthropic.claude-opus-4-5-20251101-v1:0",
+        "inference_profile_arn": "arn:aws:bedrock:eu-west-1:502456974089:inference-profile/eu.anthropic.claude-opus-4-5-20251101-v1:0",
+    },
+    {
+        "label": "Claude Sonnet 4.5 (Bedrock, EU profile)",
+        "model_id": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "inference_profile_arn": "arn:aws:bedrock:eu-west-1:502456974089:inference-profile/eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    },
+    {
+        "label": "Claude Haiku 4.5 (Bedrock, EU profile)",
+        "model_id": "anthropic.claude-haiku-4-5-20251001-v1:0",
+        "inference_profile_arn": "arn:aws:bedrock:eu-west-1:502456974089:inference-profile/eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+    },
+]
+
+OPENAI_MODELS = [
+    "gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-4o", "gpt-5.2-mini", "gpt-5.2",
+    "o1-mini", "o1", "o3-mini", "o3", "o4-mini"
+]
 
 # --- Helper Functions ---
 
@@ -65,23 +88,44 @@ def supports_reasoning_effort(model):
     ]
     return any(rm in model.lower() for rm in reasoning_models)
 
-def call_llm(prompt, model="gpt-4o", reasoning_effort=None):
-    """Call LLM with optional reasoning effort"""
-    kwargs = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-    }
+def call_llm(
+    prompt,
+    model="gpt-4o",
+    provider="openai",
+    reasoning_effort=None,
+    aws_region=None,
+    aws_profile=None,
+    bedrock_inference_profile_arn=None,
+    bedrock_max_tokens=None,
+):
+    """Call LLM with optional reasoning effort and Bedrock settings"""
+    messages = [{"role": "user", "content": prompt}]
+    text, _finish_reason = chat(
+        messages=messages,
+        model=model,
+        provider=provider,
+        api_key=OPENAI_API_KEY,
+        region=aws_region,
+        profile=aws_profile,
+        inference_profile_arn=bedrock_inference_profile_arn,
+        temperature=0,
+        reasoning_effort=reasoning_effort if provider == "openai" else None,
+        max_tokens=bedrock_max_tokens if provider == "bedrock" else None,
+    )
+    return text
 
-    # Add reasoning_effort for supported models
-    if reasoning_effort and supports_reasoning_effort(model):
-        kwargs["reasoning_effort"] = reasoning_effort
-    else:
-        kwargs["temperature"] = 0
-
-    response = client.chat.completions.create(**kwargs)
-    return response.choices[0].message.content
-
-def search_tree(query, tree_structure, model="gpt-4o", reasoning_effort=None, doc_name=None):
+def search_tree(
+    query,
+    tree_structure,
+    model="gpt-4o",
+    provider="openai",
+    reasoning_effort=None,
+    doc_name=None,
+    aws_region=None,
+    aws_profile=None,
+    bedrock_inference_profile_arn=None,
+    bedrock_max_tokens=None,
+):
     """Use LLM to find relevant nodes in the tree"""
     tree_for_search = json.dumps(tree_structure, indent=2)
 
@@ -102,7 +146,16 @@ Reply in JSON format only:
 }}
 """
 
-    result_text = call_llm(prompt, model, reasoning_effort)
+    result_text = call_llm(
+        prompt,
+        model=model,
+        provider=provider,
+        reasoning_effort=reasoning_effort,
+        aws_region=aws_region,
+        aws_profile=aws_profile,
+        bedrock_inference_profile_arn=bedrock_inference_profile_arn,
+        bedrock_max_tokens=bedrock_max_tokens,
+    )
     try:
         if "```json" in result_text:
             result_text = result_text.split("```json")[1].split("```")[0]
@@ -112,7 +165,17 @@ Reply in JSON format only:
     except:
         return {"thinking": "Failed to parse", "node_ids": []}
 
-def search_global_documents(query, documents_info, model="gpt-4o", reasoning_effort=None):
+def search_global_documents(
+    query,
+    documents_info,
+    model="gpt-4o",
+    provider="openai",
+    reasoning_effort=None,
+    aws_region=None,
+    aws_profile=None,
+    bedrock_inference_profile_arn=None,
+    bedrock_max_tokens=None,
+):
     """First stage: Find which documents are relevant to the query"""
     docs_summary = json.dumps(documents_info, indent=2)
 
@@ -133,7 +196,16 @@ Reply in JSON format only:
 Select ALL documents that might be relevant. If unsure, include the document.
 """
 
-    result_text = call_llm(prompt, model, reasoning_effort)
+    result_text = call_llm(
+        prompt,
+        model=model,
+        provider=provider,
+        reasoning_effort=reasoning_effort,
+        aws_region=aws_region,
+        aws_profile=aws_profile,
+        bedrock_inference_profile_arn=bedrock_inference_profile_arn,
+        bedrock_max_tokens=bedrock_max_tokens,
+    )
     try:
         if "```json" in result_text:
             result_text = result_text.split("```json")[1].split("```")[0]
@@ -143,7 +215,18 @@ Select ALL documents that might be relevant. If unsure, include the document.
     except:
         return {"thinking": "Failed to parse", "relevant_docs": []}
 
-def generate_answer(query, context, model="gpt-4o", reasoning_effort=None, multi_doc=False):
+def generate_answer(
+    query,
+    context,
+    model="gpt-4o",
+    provider="openai",
+    reasoning_effort=None,
+    multi_doc=False,
+    aws_region=None,
+    aws_profile=None,
+    bedrock_inference_profile_arn=None,
+    bedrock_max_tokens=None,
+):
     """Generate an answer based on retrieved context"""
     doc_note = "from multiple documents" if multi_doc else "from the document"
     prompt = f"""Answer the question based on the provided context {doc_note}.
@@ -157,16 +240,47 @@ Provide a clear, concise answer based only on the context provided. If the conte
 {"When citing information, mention which document it comes from." if multi_doc else ""}
 """
 
-    return call_llm(prompt, model, reasoning_effort)
+    return call_llm(
+        prompt,
+        model=model,
+        provider=provider,
+        reasoning_effort=reasoning_effort,
+        aws_region=aws_region,
+        aws_profile=aws_profile,
+        bedrock_inference_profile_arn=bedrock_inference_profile_arn,
+        bedrock_max_tokens=bedrock_max_tokens,
+    )
 
-def process_pdf_with_progress(pdf_path, model="gpt-4o", timeout_minutes=10, status_container=None):
+def process_pdf_with_progress(
+    pdf_path,
+    model="gpt-4o",
+    provider="openai",
+    aws_region=None,
+    aws_profile=None,
+    bedrock_inference_profile_arn=None,
+    bedrock_max_tokens=None,
+    timeout_minutes=10,
+    status_container=None,
+):
     """Process a PDF using PageIndex with real-time progress updates"""
+    command = [
+        "python3", "-u", "run_pageindex.py",  # -u for unbuffered output
+        "--pdf_path", str(pdf_path),
+        "--model", model
+    ]
+    if provider:
+        command.extend(["--provider", provider])
+    if aws_region:
+        command.extend(["--aws-region", aws_region])
+    if aws_profile:
+        command.extend(["--aws-profile", aws_profile])
+    if bedrock_inference_profile_arn:
+        command.extend(["--bedrock-inference-profile-arn", bedrock_inference_profile_arn])
+    if bedrock_max_tokens:
+        command.extend(["--bedrock-max-tokens", str(bedrock_max_tokens)])
+
     process = subprocess.Popen(
-        [
-            "python3", "-u", "run_pageindex.py",  # -u for unbuffered output
-            "--pdf_path", str(pdf_path),
-            "--model", model
-        ],
+        command,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -268,6 +382,31 @@ st.caption("Query your documents using reasoning-based retrieval - no external A
 with st.sidebar:
     st.header("📁 Documents")
 
+    with st.expander("☁️ Bedrock Settings", expanded=False):
+        bedrock_region = st.text_input(
+            "AWS region",
+            value=DEFAULT_BEDROCK_REGION,
+            help="Bedrock region (default: eu-west-1)"
+        )
+        bedrock_profile = st.text_input(
+            "AWS profile (SSO)",
+            value=os.getenv("AWS_PROFILE", ""),
+            help="Optional AWS profile name"
+        )
+        bedrock_inference_profile_override = st.text_input(
+            "Inference profile ARN (optional override)",
+            value=os.getenv("BEDROCK_INFERENCE_PROFILE_ARN", ""),
+            help="Leave blank to use the selected model's default EU inference profile."
+        )
+        bedrock_max_tokens = st.number_input(
+            "Max output tokens",
+            min_value=256,
+            max_value=8192,
+            value=2048,
+            step=256,
+            help="Max output tokens for Bedrock responses"
+        )
+
     # --- Add New Document Section ---
     with st.expander("➕ Add New Document", expanded=False):
         uploaded_files = st.file_uploader(
@@ -277,13 +416,34 @@ with st.sidebar:
             help="Upload one or more PDFs to process with PageIndex"
         )
 
-        process_model = st.selectbox(
-            "Processing model",
-            ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-4o", "gpt-5.2-mini", "gpt-5.2",
-             "o1-mini", "o1", "o3-mini", "o3", "o4-mini"],
-            key="process_model",
-            help="Model used for tree generation"
+        process_provider = st.selectbox(
+            "Processing provider",
+            ["OpenAI", "Bedrock"],
+            key="process_provider",
+            help="Provider used for tree generation"
         )
+
+        if process_provider == "Bedrock":
+            bedrock_labels = {m["model_id"]: m["label"] for m in BEDROCK_MODELS}
+            bedrock_ids = [m["model_id"] for m in BEDROCK_MODELS]
+            process_model = st.selectbox(
+                "Processing model",
+                bedrock_ids,
+                key="process_model",
+                format_func=lambda m: bedrock_labels.get(m, m),
+                help="Bedrock model used for tree generation"
+            )
+            process_profile_arn = next(
+                (m["inference_profile_arn"] for m in BEDROCK_MODELS if m["model_id"] == process_model),
+                None,
+            )
+        else:
+            process_model = st.selectbox(
+                "Processing model",
+                OPENAI_MODELS,
+                key="process_model",
+                help="OpenAI model used for tree generation"
+            )
 
         if uploaded_files:
             st.caption(f"{len(uploaded_files)} file(s) selected")
@@ -306,9 +466,15 @@ with st.sidebar:
 
                     # Process with real-time progress
                     success, stdout, stderr = process_pdf_with_progress(
-                        pdf_path, process_model,
+                        pdf_path,
+                        process_model,
+                        provider=process_provider.lower(),
+                        aws_region=bedrock_region or None,
+                        aws_profile=bedrock_profile or None,
+                        bedrock_inference_profile_arn=bedrock_inference_profile_override or process_profile_arn,
+                        bedrock_max_tokens=int(bedrock_max_tokens) if bedrock_max_tokens else None,
                         timeout_minutes=10,
-                        status_container=output_container
+                        status_container=output_container,
                     )
 
                     if success:
@@ -389,16 +555,35 @@ with st.sidebar:
 
     # --- Query Settings ---
     st.subheader("Settings")
-    query_model = st.selectbox(
-        "Query model",
-        ["gpt-5.2", "gpt-5.2-mini", "gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-4o",
-         "o1-mini", "o1", "o3-mini", "o3", "o4-mini"],
-        key="query_model"
+    query_provider = st.selectbox(
+        "Query provider",
+        ["OpenAI", "Bedrock"],
+        key="query_provider"
     )
+
+    if query_provider == "Bedrock":
+        bedrock_labels = {m["model_id"]: m["label"] for m in BEDROCK_MODELS}
+        bedrock_ids = [m["model_id"] for m in BEDROCK_MODELS]
+        query_model = st.selectbox(
+            "Query model",
+            bedrock_ids,
+            key="query_model",
+            format_func=lambda m: bedrock_labels.get(m, m)
+        )
+        query_profile_arn = next(
+            (m["inference_profile_arn"] for m in BEDROCK_MODELS if m["model_id"] == query_model),
+            None,
+        )
+    else:
+        query_model = st.selectbox(
+            "Query model",
+            OPENAI_MODELS,
+            key="query_model"
+        )
 
     # Show reasoning effort only for supported models
     reasoning_effort = None
-    if supports_reasoning_effort(query_model):
+    if query_provider == "OpenAI" and supports_reasoning_effort(query_model):
         reasoning_effort = st.select_slider(
             "Reasoning effort",
             options=["low", "medium", "high"],
@@ -429,7 +614,17 @@ if is_global_mode:
                 {"name": name, "summary": info["summary"], "node_count": info["node_count"]}
                 for name, info in all_docs.items()
             ]
-            doc_search_result = search_global_documents(query, docs_info, model=query_model, reasoning_effort=reasoning_effort)
+            doc_search_result = search_global_documents(
+                query,
+                docs_info,
+                model=query_model,
+                provider=query_provider.lower(),
+                reasoning_effort=reasoning_effort,
+                aws_region=bedrock_region or None,
+                aws_profile=bedrock_profile or None,
+                bedrock_inference_profile_arn=bedrock_inference_profile_override or (query_profile_arn if query_provider == "Bedrock" else None),
+                bedrock_max_tokens=int(bedrock_max_tokens) if bedrock_max_tokens else None,
+            )
 
         st.subheader("🔍 Document Selection")
         st.info(f"**Reasoning:** {doc_search_result.get('thinking', 'N/A')}")
@@ -454,10 +649,16 @@ if is_global_mode:
 
                     doc_info = all_docs[doc_name]
                     search_result = search_tree(
-                        query, doc_info["structure"],
+                        query,
+                        doc_info["structure"],
                         model=query_model,
+                        provider=query_provider.lower(),
                         reasoning_effort=reasoning_effort,
-                        doc_name=doc_name
+                        doc_name=doc_name,
+                        aws_region=bedrock_region or None,
+                        aws_profile=bedrock_profile or None,
+                        bedrock_inference_profile_arn=bedrock_inference_profile_override or (query_profile_arn if query_provider == "Bedrock" else None),
+                        bedrock_max_tokens=int(bedrock_max_tokens) if bedrock_max_tokens else None,
                     )
 
                     retrieved_nodes = search_result.get("node_ids", [])
@@ -505,7 +706,18 @@ if is_global_mode:
                 # Generate answer
                 st.subheader("💡 Answer")
                 with st.spinner("Generating answer..."):
-                    answer = generate_answer(query, context, model=query_model, reasoning_effort=reasoning_effort, multi_doc=True)
+                    answer = generate_answer(
+                        query,
+                        context,
+                        model=query_model,
+                        provider=query_provider.lower(),
+                        reasoning_effort=reasoning_effort,
+                        multi_doc=True,
+                        aws_region=bedrock_region or None,
+                        aws_profile=bedrock_profile or None,
+                        bedrock_inference_profile_arn=bedrock_inference_profile_override or (query_profile_arn if query_provider == "Bedrock" else None),
+                        bedrock_max_tokens=int(bedrock_max_tokens) if bedrock_max_tokens else None,
+                    )
                 st.markdown(answer)
             else:
                 st.warning("No relevant sections found in the selected documents.")
@@ -535,7 +747,17 @@ elif selected_tree:
     if query:
         # Search
         with st.spinner("🔍 Searching document tree..."):
-            search_result = search_tree(query, structure, model=query_model, reasoning_effort=reasoning_effort)
+            search_result = search_tree(
+                query,
+                structure,
+                model=query_model,
+                provider=query_provider.lower(),
+                reasoning_effort=reasoning_effort,
+                aws_region=bedrock_region or None,
+                aws_profile=bedrock_profile or None,
+                bedrock_inference_profile_arn=bedrock_inference_profile_override or (query_profile_arn if query_provider == "Bedrock" else None),
+                bedrock_max_tokens=int(bedrock_max_tokens) if bedrock_max_tokens else None,
+            )
 
         # Show reasoning
         st.subheader("🔍 Retrieval")
@@ -578,9 +800,19 @@ elif selected_tree:
             # Generate answer
             st.subheader("💡 Answer")
             with st.spinner("Generating answer..."):
-                answer = generate_answer(query, context, model=query_model, reasoning_effort=reasoning_effort)
+                answer = generate_answer(
+                    query,
+                    context,
+                    model=query_model,
+                    provider=query_provider.lower(),
+                    reasoning_effort=reasoning_effort,
+                    aws_region=bedrock_region or None,
+                    aws_profile=bedrock_profile or None,
+                    bedrock_inference_profile_arn=bedrock_inference_profile_override or (query_profile_arn if query_provider == "Bedrock" else None),
+                    bedrock_max_tokens=int(bedrock_max_tokens) if bedrock_max_tokens else None,
+                )
             st.markdown(answer)
 
 # Footer
 st.divider()
-st.caption("Powered by PageIndex tree structures + OpenAI | No PageIndex SaaS required")
+st.caption("Powered by PageIndex tree structures + OpenAI/Bedrock | No PageIndex SaaS required")

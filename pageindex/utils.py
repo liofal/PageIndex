@@ -1,5 +1,4 @@
 import tiktoken
-import openai
 import logging
 import os
 from datetime import datetime
@@ -16,19 +15,36 @@ import logging
 import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
+try:
+    from .llm import chat, chat_async, get_defaults, resolve_provider
+except Exception:  # pragma: no cover - fallback for script usage
+    from llm import chat, chat_async, get_defaults, resolve_provider
 
 CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
 
 def count_tokens(text, model=None):
     if not text:
         return 0
-    enc = tiktoken.encoding_for_model(model)
+    try:
+        enc = tiktoken.encoding_for_model(model)
+    except Exception:
+        enc = tiktoken.get_encoding("cl100k_base")
     tokens = enc.encode(text)
     return len(tokens)
 
-def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def ChatGPT_API_with_finish_reason(
+    model,
+    prompt,
+    api_key=CHATGPT_API_KEY,
+    chat_history=None,
+    provider=None,
+    aws_region=None,
+    aws_profile=None,
+    bedrock_inference_profile_arn=None,
+    bedrock_max_tokens=None,
+    reasoning_effort=None,
+):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -37,15 +53,24 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
             else:
                 messages = [{"role": "user", "content": prompt}]
             
-            response = client.chat.completions.create(
-                model=model,
+            defaults = get_defaults()
+            resolved_provider = resolve_provider(provider or defaults.get("provider"), model)
+            max_tokens = bedrock_max_tokens or defaults.get("bedrock_max_tokens")
+            text, finish_reason = chat(
                 messages=messages,
+                model=model,
+                provider=resolved_provider,
+                api_key=api_key or defaults.get("openai_api_key"),
+                region=aws_region or defaults.get("aws_region"),
+                profile=aws_profile or defaults.get("aws_profile"),
+                inference_profile_arn=bedrock_inference_profile_arn or defaults.get("bedrock_inference_profile_arn"),
                 temperature=0,
+                reasoning_effort=reasoning_effort,
+                max_tokens=max_tokens,
             )
-            if response.choices[0].finish_reason == "length":
-                return response.choices[0].message.content, "max_output_reached"
-            else:
-                return response.choices[0].message.content, "finished"
+            if finish_reason in ("length", "max_tokens"):
+                return text, "max_output_reached"
+            return text, "finished"
 
         except Exception as e:
             print('************* Retrying *************')
@@ -58,9 +83,19 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
 
 
 
-def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def ChatGPT_API(
+    model,
+    prompt,
+    api_key=CHATGPT_API_KEY,
+    chat_history=None,
+    provider=None,
+    aws_region=None,
+    aws_profile=None,
+    bedrock_inference_profile_arn=None,
+    bedrock_max_tokens=None,
+    reasoning_effort=None,
+):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -69,13 +104,20 @@ def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
             else:
                 messages = [{"role": "user", "content": prompt}]
             
-            response = client.chat.completions.create(
-                model=model,
+            defaults = get_defaults()
+            text, _finish_reason = chat(
                 messages=messages,
+                model=model,
+                provider=provider or defaults.get("provider"),
+                api_key=api_key or defaults.get("openai_api_key"),
+                region=aws_region or defaults.get("aws_region"),
+                profile=aws_profile or defaults.get("aws_profile"),
+                inference_profile_arn=bedrock_inference_profile_arn or defaults.get("bedrock_inference_profile_arn"),
                 temperature=0,
+                reasoning_effort=reasoning_effort,
+                max_tokens=bedrock_max_tokens or defaults.get("bedrock_max_tokens"),
             )
-   
-            return response.choices[0].message.content
+            return text
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
@@ -86,18 +128,35 @@ def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
                 return "Error"
             
 
-async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
+async def ChatGPT_API_async(
+    model,
+    prompt,
+    api_key=CHATGPT_API_KEY,
+    provider=None,
+    aws_region=None,
+    aws_profile=None,
+    bedrock_inference_profile_arn=None,
+    bedrock_max_tokens=None,
+    reasoning_effort=None,
+):
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
     for i in range(max_retries):
         try:
-            async with openai.AsyncOpenAI(api_key=api_key) as client:
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=0,
-                )
-                return response.choices[0].message.content
+            defaults = get_defaults()
+            text, _finish_reason = await chat_async(
+                messages=messages,
+                model=model,
+                provider=provider or defaults.get("provider"),
+                api_key=api_key or defaults.get("openai_api_key"),
+                region=aws_region or defaults.get("aws_region"),
+                profile=aws_profile or defaults.get("aws_profile"),
+                inference_profile_arn=bedrock_inference_profile_arn or defaults.get("bedrock_inference_profile_arn"),
+                temperature=0,
+                reasoning_effort=reasoning_effort,
+                max_tokens=bedrock_max_tokens or defaults.get("bedrock_max_tokens"),
+            )
+            return text
         except Exception as e:
             print('************* Retrying *************')
             logging.error(f"Error: {e}")
