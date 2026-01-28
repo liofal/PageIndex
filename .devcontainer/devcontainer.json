@@ -3,7 +3,7 @@
 {
 	"name": "Python 3",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"image": "mcr.microsoft.com/devcontainers/python:2-3.14-trixie",
+	"image": "mcr.microsoft.com/devcontainers/python:2-3.13-trixie",
 
   "features": {
     // "ghcr.io/dhoeric/features/google-cloud-cli:1": {},
