@@ -177,6 +177,7 @@ You can customize the processing with additional optional arguments:
 --aws-profile           AWS profile for Bedrock (optional, supports SSO)
 --bedrock-inference-profile-arn Bedrock inference profile ARN (optional)
 --bedrock-max-tokens    Max output tokens for Bedrock models (optional)
+--output-dir            Output directory for generated structures (default: ./results)
 ```
 </details>
 

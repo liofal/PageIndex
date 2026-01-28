@@ -20,6 +20,8 @@ if __name__ == "__main__":
                       help='Bedrock inference profile ARN (optional)')
     parser.add_argument('--bedrock-max-tokens', type=int, default=None,
                       help='Max output tokens for Bedrock models (optional)')
+    parser.add_argument('--output-dir', type=str, default='./results',
+                      help='Output directory for generated structure (default: ./results)')
 
     parser.add_argument('--toc-check-pages', type=int, default=20, 
                       help='Number of pages to check for table of contents (PDF only)')
@@ -93,7 +95,7 @@ if __name__ == "__main__":
         
         # Save results
         pdf_name = os.path.splitext(os.path.basename(args.pdf_path))[0]    
-        output_dir = './results'
+        output_dir = args.output_dir
         output_file = f'{output_dir}/{pdf_name}_structure.json'
         os.makedirs(output_dir, exist_ok=True)
         
@@ -159,7 +161,7 @@ if __name__ == "__main__":
         
         # Save results
         md_name = os.path.splitext(os.path.basename(args.md_path))[0]    
-        output_dir = './results'
+        output_dir = args.output_dir
         output_file = f'{output_dir}/{md_name}_structure.json'
         os.makedirs(output_dir, exist_ok=True)
         
