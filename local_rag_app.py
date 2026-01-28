@@ -7,6 +7,7 @@ Supports single document and global knowledge base modes
 import streamlit as st
 import json
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -36,6 +37,9 @@ BEDROCK_MODELS = [
         "inference_profile_arn": "arn:aws:bedrock:eu-west-1:502456974089:inference-profile/eu.anthropic.claude-haiku-4-5-20251001-v1:0",
     },
 ]
+
+DEFAULT_PROVIDER = (os.getenv("PAGEINDEX_PROVIDER") or "openai").lower()
+DEFAULT_BEDROCK_MODEL_ID = "anthropic.claude-sonnet-4-5-20250929-v1:0"
 
 OPENAI_MODELS = [
     "gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-4o", "gpt-5.2-mini", "gpt-5.2",
@@ -259,6 +263,7 @@ def process_pdf_with_progress(
     aws_profile=None,
     bedrock_inference_profile_arn=None,
     bedrock_max_tokens=None,
+    output_dir=None,
     timeout_minutes=10,
     status_container=None,
 ):
@@ -278,6 +283,8 @@ def process_pdf_with_progress(
         command.extend(["--bedrock-inference-profile-arn", bedrock_inference_profile_arn])
     if bedrock_max_tokens:
         command.extend(["--bedrock-max-tokens", str(bedrock_max_tokens)])
+    if output_dir:
+        command.extend(["--output-dir", str(output_dir)])
 
     process = subprocess.Popen(
         command,
@@ -324,18 +331,59 @@ def process_pdf_with_progress(
 
 def get_available_trees():
     """Get list of available tree structure files"""
+    return get_available_trees_for_workspace("default")
+
+
+def sanitize_workspace_name(name: str) -> str:
+    cleaned = name.strip()
+    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "_", cleaned)
+    cleaned = cleaned.strip("._-")
+    return cleaned or "default"
+
+
+def list_workspaces() -> list:
     results_dir = Path("results")
+    workspaces = set()
+    if results_dir.exists():
+        for entry in results_dir.iterdir():
+            if entry.is_dir():
+                workspaces.add(entry.name)
+    workspaces.add("default")
+    return sorted(workspaces)
+
+
+def workspace_results_dir(workspace: str) -> Path:
+    if workspace == "default":
+        return Path("results")
+    return Path("results") / workspace
+
+
+def workspace_uploads_dir(workspace: str) -> Path:
+    if workspace == "default":
+        return Path("uploads")
+    return Path("uploads") / workspace
+
+
+def ensure_workspace_dirs(workspace: str) -> None:
+    workspace_results_dir(workspace).mkdir(parents=True, exist_ok=True)
+    workspace_uploads_dir(workspace).mkdir(parents=True, exist_ok=True)
+
+
+def get_available_trees_for_workspace(workspace: str):
+    """Get list of available tree structure files for a workspace"""
+    results_dir = workspace_results_dir(workspace)
     if results_dir.exists():
         return list(results_dir.glob("*_structure.json"))
     return []
 
-def find_pdf_for_tree(tree_path):
+def find_pdf_for_tree(tree_path, workspace: str):
     """Try to find the original PDF for a tree structure"""
     pdf_name = tree_path.stem.replace("_structure", "")
+    uploads_dir = workspace_uploads_dir(workspace)
     possible_paths = [
         Path(f"tests/pdfs/{pdf_name}.pdf"),
         Path(f"pdfs/{pdf_name}.pdf"),
-        Path(f"uploads/{pdf_name}.pdf"),
+        uploads_dir / f"{pdf_name}.pdf",
         Path(f"{pdf_name}.pdf"),
     ]
     for p in possible_paths:
@@ -354,10 +402,10 @@ def get_doc_summary(tree_data):
         return root.get('title', 'No title')
     return "No summary available"
 
-def load_all_documents():
+def load_all_documents(workspace: str):
     """Load all available documents and their metadata"""
     documents = {}
-    for tree_path in get_available_trees():
+    for tree_path in get_available_trees_for_workspace(workspace):
         doc_name = tree_path.stem.replace("_structure", "")
         tree_data = load_tree_structure(tree_path)
         documents[doc_name] = {
@@ -365,7 +413,7 @@ def load_all_documents():
             "tree_data": tree_data,
             "structure": tree_data.get("structure", []),
             "node_map": create_node_map(tree_data.get("structure", [])),
-            "pdf_path": find_pdf_for_tree(tree_path),
+            "pdf_path": find_pdf_for_tree(tree_path, workspace),
             "summary": get_doc_summary(tree_data),
             "node_count": len(flatten_nodes(tree_data.get("structure", [])))
         }
@@ -381,6 +429,38 @@ st.caption("Query your documents using reasoning-based retrieval - no external A
 # Sidebar
 with st.sidebar:
     st.header("📁 Documents")
+
+    if "workspace_select" not in st.session_state:
+        st.session_state["workspace_select"] = "default"
+    pending_workspace = st.session_state.pop("workspace_select_pending", None)
+    if pending_workspace:
+        st.session_state["workspace_select"] = pending_workspace
+
+    workspace_options = list_workspaces()
+    create_workspace_label = "Create new..."
+    if create_workspace_label not in workspace_options:
+        workspace_options.append(create_workspace_label)
+    selected_value = st.session_state.get("workspace_select", "default")
+    default_workspace_index = workspace_options.index(selected_value) if selected_value in workspace_options else 0
+    selected_workspace = st.selectbox(
+        "Workspace",
+        workspace_options,
+        index=default_workspace_index,
+        key="workspace_select",
+        help="Work with a subset of documents stored under results/<workspace>/ and uploads/<workspace>/"
+    )
+    if selected_workspace == create_workspace_label:
+        new_workspace_name = st.text_input("New workspace name", key="workspace_new_name")
+        if st.button("Create workspace"):
+            workspace_name = sanitize_workspace_name(new_workspace_name)
+            ensure_workspace_dirs(workspace_name)
+            st.session_state["workspace_select_pending"] = workspace_name
+            st.rerun()
+        workspace = "default"
+    else:
+        workspace = selected_workspace
+
+    ensure_workspace_dirs(workspace)
 
     with st.expander("☁️ Bedrock Settings", expanded=False):
         bedrock_region = st.text_input(
@@ -416,9 +496,12 @@ with st.sidebar:
             help="Upload one or more PDFs to process with PageIndex"
         )
 
+        process_provider_options = ["OpenAI", "Bedrock"]
+        process_provider_index = 0 if DEFAULT_PROVIDER != "bedrock" else 1
         process_provider = st.selectbox(
             "Processing provider",
-            ["OpenAI", "Bedrock"],
+            process_provider_options,
+            index=process_provider_index,
             key="process_provider",
             help="Provider used for tree generation"
         )
@@ -426,9 +509,13 @@ with st.sidebar:
         if process_provider == "Bedrock":
             bedrock_labels = {m["model_id"]: m["label"] for m in BEDROCK_MODELS}
             bedrock_ids = [m["model_id"] for m in BEDROCK_MODELS]
+            bedrock_default_index = 0
+            if DEFAULT_BEDROCK_MODEL_ID in bedrock_ids:
+                bedrock_default_index = bedrock_ids.index(DEFAULT_BEDROCK_MODEL_ID)
             process_model = st.selectbox(
                 "Processing model",
                 bedrock_ids,
+                index=bedrock_default_index,
                 key="process_model",
                 format_func=lambda m: bedrock_labels.get(m, m),
                 help="Bedrock model used for tree generation"
@@ -448,8 +535,8 @@ with st.sidebar:
         if uploaded_files:
             st.caption(f"{len(uploaded_files)} file(s) selected")
             if st.button("🚀 Process Document(s)", type="primary"):
-                uploads_dir = Path("uploads")
-                uploads_dir.mkdir(exist_ok=True)
+                uploads_dir = workspace_uploads_dir(workspace)
+                uploads_dir.mkdir(parents=True, exist_ok=True)
 
                 progress_bar = st.progress(0)
                 file_status = st.empty()
@@ -475,6 +562,7 @@ with st.sidebar:
                         bedrock_max_tokens=int(bedrock_max_tokens) if bedrock_max_tokens else None,
                         timeout_minutes=10,
                         status_container=output_container,
+                        output_dir=workspace_results_dir(workspace),
                     )
 
                     if success:
@@ -500,7 +588,7 @@ with st.sidebar:
     st.divider()
 
     # --- Query Mode Selection ---
-    available_trees = get_available_trees()
+    available_trees = get_available_trees_for_workspace(workspace)
 
     if not available_trees:
         st.warning("No documents yet. Upload a PDF above to get started.")
@@ -533,7 +621,7 @@ with st.sidebar:
             structure = tree_data.get("structure", [])
             node_count = len(flatten_nodes(structure))
 
-            pdf_path = find_pdf_for_tree(selected_tree)
+            pdf_path = find_pdf_for_tree(selected_tree, workspace)
 
             st.caption(f"📊 {node_count} nodes indexed")
             if pdf_path:
@@ -543,7 +631,7 @@ with st.sidebar:
     else:
         # Show global stats
         total_docs = len(available_trees)
-        all_docs = load_all_documents()
+        all_docs = load_all_documents(workspace)
         total_nodes = sum(d["node_count"] for d in all_docs.values())
         st.caption(f"📚 {total_docs} documents | {total_nodes} total nodes")
 
@@ -555,18 +643,25 @@ with st.sidebar:
 
     # --- Query Settings ---
     st.subheader("Settings")
+    query_provider_options = ["OpenAI", "Bedrock"]
+    query_provider_index = 0 if DEFAULT_PROVIDER != "bedrock" else 1
     query_provider = st.selectbox(
         "Query provider",
-        ["OpenAI", "Bedrock"],
+        query_provider_options,
+        index=query_provider_index,
         key="query_provider"
     )
 
     if query_provider == "Bedrock":
         bedrock_labels = {m["model_id"]: m["label"] for m in BEDROCK_MODELS}
         bedrock_ids = [m["model_id"] for m in BEDROCK_MODELS]
+        bedrock_default_index = 0
+        if DEFAULT_BEDROCK_MODEL_ID in bedrock_ids:
+            bedrock_default_index = bedrock_ids.index(DEFAULT_BEDROCK_MODEL_ID)
         query_model = st.selectbox(
             "Query model",
             bedrock_ids,
+            index=bedrock_default_index,
             key="query_model",
             format_func=lambda m: bedrock_labels.get(m, m)
         )
@@ -597,7 +692,7 @@ if is_global_mode:
     st.subheader("🌐 Global Knowledge Base")
     st.caption("Query across all your documents")
 
-    all_docs = load_all_documents()
+    all_docs = load_all_documents(workspace)
 
     # Query input
     query = st.text_input(
@@ -727,7 +822,7 @@ elif selected_tree:
     tree_data = load_tree_structure(selected_tree)
     structure = tree_data.get("structure", [])
     node_map = create_node_map(structure)
-    pdf_path = find_pdf_for_tree(selected_tree)
+    pdf_path = find_pdf_for_tree(selected_tree, workspace)
 
     doc_name = selected_tree.stem.replace("_structure", "")
     st.subheader(f"📄 {doc_name}")
