@@ -766,6 +766,11 @@ class ConfigLoader:
         else:
             raise TypeError("user_opt must be dict, config(SimpleNamespace) or None")
 
+        if "provider" not in user_dict:
+            env_provider = os.getenv("PAGEINDEX_PROVIDER")
+            if env_provider:
+                user_dict["provider"] = env_provider
+
         self._validate_keys(user_dict)
         merged = {**self._default_dict, **user_dict}
         return config(**merged)

@@ -63,7 +63,10 @@ def set_defaults(
 
 
 def get_defaults() -> Dict[str, Any]:
-    return dict(_DEFAULTS)
+    defaults = dict(_DEFAULTS)
+    if not defaults.get("provider"):
+        defaults["provider"] = os.getenv("PAGEINDEX_PROVIDER") or None
+    return defaults
 
 
 def resolve_provider(provider: Optional[str], model: Optional[str]) -> str:
