@@ -1,0 +1,110 @@
+{
+  "version": "2.0.0",
+  "inputs": [
+    {
+      "id": "pdfPath",
+      "type": "promptString",
+      "description": "Path to the PDF file",
+      "default": "${workspaceFolder}/tests/pdfs/2023-annual-report-truncated.pdf"
+    },
+    {
+      "id": "mdPath",
+      "type": "promptString",
+      "description": "Path to the Markdown file",
+      "default": "${workspaceFolder}/README.md"
+    },
+    {
+      "id": "model",
+      "type": "promptString",
+      "description": "OpenAI model",
+      "default": "gpt-4o-2024-11-20"
+    },
+    {
+      "id": "streamlitPort",
+      "type": "promptString",
+      "description": "Streamlit port",
+      "default": "8501"
+    }
+  ],
+  "tasks": [
+    {
+      "label": "Install dependencies",
+      "type": "shell",
+      "command": "pip3",
+      "args": ["install", "--upgrade", "-r", "requirements.txt"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Install Streamlit (optional UI)",
+      "type": "shell",
+      "command": "pip3",
+      "args": ["install", "--upgrade", "streamlit"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run PageIndex (PDF)",
+      "type": "shell",
+      "command": "python3",
+      "args": [
+        "run_pageindex.py",
+        "--pdf_path",
+        "${input:pdfPath}",
+        "--model",
+        "${input:model}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PYTHONUNBUFFERED": "1"
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run PageIndex (Markdown)",
+      "type": "shell",
+      "command": "python3",
+      "args": [
+        "run_pageindex.py",
+        "--md_path",
+        "${input:mdPath}",
+        "--model",
+        "${input:model}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PYTHONUNBUFFERED": "1"
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Local RAG App (Streamlit)",
+      "type": "shell",
+      "command": "python3",
+      "args": [
+        "-m",
+        "streamlit",
+        "run",
+        "local_rag_app.py",
+        "--server.port",
+        "${input:streamlitPort}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PYTHONUNBUFFERED": "1"
+        }
+      },
+      "problemMatcher": []
+    }
+  ]
+}
